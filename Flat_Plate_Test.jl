@@ -1,7 +1,7 @@
 using XCALibre
 #https://essay.utwente.nl/fileshare/file/63314/BSc_report_Peter_Puttkammer.pdf
 grids_dir = pkgdir(XCALibre, "test_meshes/")
-grid = "Mesh_2.unv"
+grid = "Mesh_8.unv"
 mesh_file = joinpath(grids_dir, grid)
 
 mesh = UNV2D_mesh(mesh_file, scale=0.001)
@@ -16,8 +16,8 @@ mesh_dev = mesh
 rho = 1.2041 # kg/m^3
 mu = 1.827e-5 # Pas
 nu = mu/rho
-free_stream_velocity = 1
-#free_stream_velocity = 10
+#free_stream_velocity = 1
+free_stream_velocity = 10
 #free_stream_velocity = 20
 velocity = [free_stream_velocity,0,0]
 pressure = 0
@@ -64,7 +64,7 @@ solvers = (
         rtol = 1e-1
     ),
     p = SolverSetup(
-        solver = Cg(),
+        solver = Bicgstab(),#Cg(),
         preconditioner = Jacobi(),
         convergence = 1e-7,
         relax = 0.7,
