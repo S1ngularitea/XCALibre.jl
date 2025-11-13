@@ -1,7 +1,7 @@
 using XCALibre
-
+#https://essay.utwente.nl/fileshare/file/63314/BSc_report_Peter_Puttkammer.pdf
 grids_dir = pkgdir(XCALibre, "test_meshes/")
-grid = "Mesh_1.unv"
+grid = "Mesh_2.unv"
 mesh_file = joinpath(grids_dir, grid)
 
 mesh = UNV2D_mesh(mesh_file, scale=0.001)
@@ -58,16 +58,16 @@ solvers = (
     U = SolverSetup(
         solver = Bicgstab(),
         preconditioner = Jacobi(),
-        convergence = 1e-5,
+        convergence = 1e-7,
         relax = 0.7,
         rtol = 1e-1
     ),
     p = SolverSetup(
-        solver = Bicgstab(),
+        solver = Cg(),
         preconditioner = Jacobi(),
-        convergence = 1e-5,
+        convergence = 1e-7,
         relax = 0.7,
-        rtol = 1e-2
+        rtol = 1e-1
     )
 )
 
