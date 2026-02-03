@@ -2,9 +2,11 @@ using XCALibre
 # using CUDA # Uncomment to run on NVIDIA GPUs
 # using AMDGPU # Uncomment to run on AMD GPUs
 
-grids_dir = pkgdir(XCALibre, "Test_Meshes/");
-#grid = "quad.unv";
-grid = "25x25_grid.unv"
+grids_dir = pkgdir(XCALibre, "examples/0_GRIDS/");
+#grids_dir = pkgdir(XCALibre, "Test_Meshes/");
+grid = "quad.unv";
+#grid = "25x25_grid.unv"
+#grid = "10x10_grid.unv"
 mesh_file = joinpath(grids_dir, grid);
 
 mesh = UNV2D_mesh(mesh_file, scale=0.001);
@@ -20,24 +22,17 @@ hardware = Hardware(backend=backend, workgroup=1024);
 mesh_dev = mesh; # use this line to run on CPU
 # mesh_dev = adapt(backend, mesh)  # Uncomment to run on GPU 
 
-
-inlet_size = 0.01; # m - taken from model in Salome
-rho_l = 1;#991.07; # Density of water @ 43°C kg/m3
-Γ=200; # g/m/s
-Γkg = Γ/1000; # kg/m/s
-inlet_flow_rate = Γkg/rho_l; # m2/s
-h_inlet = 0.005;
-inlet_speed = inlet_flow_rate/h_inlet;
+rho_l = 100;
+rho_l = 1;
+rho_l = 991.07; # Density of water @ 43°C kg/m3
 inlet_speed = 0.04;
+h_inlet = 0.005;
 
 velocity = inlet_speed*[1, 0.0, 0.0];
 nu = 6.245e-7; # Kinematic Viscosity of water @ 43°C
 Re = velocity[1]*0.01/nu;
 
-
 h_crit = 1e-10;
-
-
 
 model = Physics(
     momentum=Momentum{EFM}(; h_crit = h_crit, β=6.0, θm = 75, ϕ=90),
@@ -53,41 +48,14 @@ BCs = assign(
     (
         U = [
             Dirichlet(:inlet, velocity),
-            #Extrapolated(:outlet),
             Zerogradient(:outlet),
-            #Extrapolated(:outlet),
-            #Wall(:wall, [0.0, 0.0, 0.0]),
-            #Zerogradient(:bottom),
-            #Zerogradient(:wall),
             Wall(:bottom, [0.0, 0.0, 0.0]),
-            #Extrapolated(:bottom),
             Wall(:top, [0.0, 0.0, 0.0])
-            #Zerogradient(:top)
-            #Extrapolated(:top)
         ],
         h = [
             Dirichlet(:inlet, h_inlet),
-            #Zerogradient(:inlet),
-            #Extrapolated(:inlet),
-            #Dirichlet(:outlet, h_crit),
-            #Wall(:outlet),
-            Zerogradient(:outlet),
-            #Extrapolated(:outlet),
-            #Wall(:wall),
-            Zerogradient(:bottom),
-            #Dirichlet(:bottom, h_crit),
-            #Zerogradient(:wall),
-            #Extrapolated(:bottom),
-            #Wall(:top)
-            Zerogradient(:top)
-            #Dirichlet(:top, h_crit)
-            #Extrapolated(:top)
-        ],
-        PL = [
-            Zerogradient(:inlet),
             Zerogradient(:outlet),
             Zerogradient(:bottom),
-            #Zerogradient(:wall),
             Zerogradient(:top)
         ]
     )
@@ -96,7 +64,6 @@ BCs = assign(
 schemes = (
     U = Schemes(divergence = Linear),
     h = Schemes(), # no input provided (will use defaults)
-    PL = Schemes()
 );
 
 solvers = (
@@ -113,14 +80,6 @@ solvers = (
         preconditioner = Jacobi(), # Options: NormDiagonal()
         convergence = 1e-7,
         relax       = 0.7,
-        rtol = 1e-4,
-        atol = 1e-10
-    ),
-    PL = SolverSetup(
-        solver      = Bicgstab(),
-        preconditioner = Jacobi(),
-        convergence = 1e-7,
-        relax = 0.7,
         rtol = 1e-4,
         atol = 1e-10
     )
