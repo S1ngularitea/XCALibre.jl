@@ -105,3 +105,6 @@ initialise!(model.momentum.h, h_crit/100)
 residuals = run!(model, config);
 
 using Plots
+
+plot(residuals.Ux)
+plot!(residuals.Uy)
