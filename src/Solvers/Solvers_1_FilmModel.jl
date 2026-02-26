@@ -20,13 +20,15 @@ function setup_FilmModel_Solver(solver_variant, model, config;
 
     @info "Extracting configuration and input fields..."
 
-    (; U, h, Uf, hf) = model.momentum
+    (; U, phi, Uf, phif) = model.momentum
     mesh = model.domain
     (; rho) = model.fluid
     
 
     @info "Pre-allocating fields..."
-    rho_mdotf = FaceScalarField(mesh)
+    h = ScalarField(mesh)
+    hf = FaceScalarField(mesh)
+    mdotf = FaceScalarField(mesh)
     hmdotf = FaceScalarField(mesh)
     rhohf = FaceScalarField(mesh)
     Sm = ScalarField(mesh)
@@ -53,22 +55,22 @@ function setup_FilmModel_Solver(solver_variant, model, config;
         + Source(τθw)
     ) → VectorEquation(U, boundaries.U)
 
-    h_eqn = (
-        Time{schemes.h.time}(rho_l, h)
-        + Divergence{schemes.h.divergence}(rho_mdotf, h)
+    phi_eqn = (
+        Time{schemes.phi.time}(phi)
+        + Divergence{schemes.phi.divergence}(mdotf, phi)
         ==
         Source(Sm)
-    ) → ScalarEquation(h, boundaries.h)
+    ) → ScalarEquation(phi, boundaries.phi)
 
     @info "Initialising preconditioners"
 
     @reset U_eqn.preconditioner = set_preconditioner(solvers.U.preconditioner, U_eqn)
-    @reset h_eqn.preconditioner = set_preconditioner(solvers.h.preconditioner, h_eqn)
+    @reset phi_eqn.preconditioner = set_preconditioner(solvers.phi.preconditioner, phi_eqn)
 
     @info "Pre-allocating solvers"
 
     @reset U_eqn.solver = _workspace(solvers.U.solver, _b(U_eqn, XDir()))
-    @reset h_eqn.solver = _workspace(solvers.h.solver, _b(h_eqn))
+    @reset phi_eqn.solver = _workspace(solvers.phi.solver, _b(phi_eqn))
 
     @info "No turbulence model for now"
     #p_eqn = (Time{schemes.h.time}(rho_l,h)==Source(Sm)) → ScalarEquation(h, boundaries.h)
@@ -76,18 +78,18 @@ function setup_FilmModel_Solver(solver_variant, model, config;
 
     residuals = solver_variant(
         model, #turbulenceModel,
-         U_eqn, h_eqn, config
+         U_eqn, phi_eqn, config
     )
 end
 
 function FilmModel(
     model, #turbulenceModel,
-     U_eqn, h_eqn, config;
+     U_eqn, phi_eqn, config;
     output=VTK(), ncorrectors=0
 )
 
     
-    (; U, h, Uf, hf, coeffs) = model.momentum
+    (; U, phi, Uf, phif, coeffs) = model.momentum
     (; rho, nu) = model.fluid
     mesh = model.domain
     (; solvers, schemes, runtime, hardware, boundaries, postprocess) = config
@@ -104,8 +106,8 @@ function FilmModel(
     τw = get_source(U_eqn,3)
     τθw = get_source(U_eqn,4)
     
-    rho_mdotf = get_flux(h_eqn,2)
-    Sm = get_source(h_eqn,1)
+    mdotf = get_flux(phi_eqn,2)
+    Sm = get_source(phi_eqn,1)
     mu = nu.values*rho.values
 
     outputWriter = initialise_writer(output, model.domain)
@@ -117,19 +119,22 @@ function FilmModel(
     G = g*[0,0,-1]
 
     # Define aux fields
-    mdotf = FaceScalarField(mesh)
+    #mdotf = FaceScalarField(mesh)
 
+    h = ScalarField(mesh)
+    hf = FaceScalarField(mesh)
     PLf = FaceScalarField(mesh)
     ∇PL = Grad{Gauss}(PLf)
 
-    ∇h = Grad{schemes.h.gradient}(h)
+
+    ∇h = Grad{Gauss}(h)
     ∇hf = FaceVectorField(mesh)
     Δh = ScalarField(mesh)
     Δhf = FaceScalarField(mesh)
 
     w = ScalarField(mesh)
     wf = FaceScalarField(mesh)
-    ∇w = Grad{schemes.h.gradient}(w)
+    ∇w = Grad{Gauss}(w)
     
     plate_tangent_vector = [1,0,0] # temporary,  should be worked out later
 
@@ -169,6 +174,8 @@ function FilmModel(
     #τw_func! = _calculate_τw!(_setup(backend, workgroup, ndrange_VF)...)
     #τθw_func! = _calculate_τθw!(_setup(backend, workgroup, ndrange_VF)...)
     
+    @. h.values = phi.values / rho.values
+    #println(h.values)
     # Pre-allocate auxiliary variables
     TF = _get_float(mesh)
     
@@ -181,7 +188,7 @@ function FilmModel(
     R_ux = zeros(TF, iterations)
     R_uy = zeros(TF, iterations)
     R_uz = zeros(TF, iterations)
-    R_h = zeros(TF, iterations)
+    R_phi = zeros(TF, iterations)
 
     # Initial calculations
     time = zero(TF) # assuming time = 0
@@ -193,8 +200,8 @@ function FilmModel(
     rho_mdotf = mdotf.values .* rho.values
     
     # Getting the laplacian of h for first U calculation
-    grad!(∇h, hf, h, boundaries.h, time, config)
-    limit_gradient!(schemes.h.limiter, ∇h, h, config)
+    grad!(∇h, hf, h, boundaries.phi, time, config) #Need to correct this at some point
+    limit_gradient!(schemes.phi.limiter, ∇h, h, config)
     div!(Δh, ∇hf, config)
     interpolate!(Δhf, Δh, config)
     correct_boundaries!(Δhf, Δh, Δh_bc, time, config)
@@ -243,8 +250,8 @@ function FilmModel(
     progress = Progress(iterations; dt=1.0, showspeed=true)
 
     xdir, ydir, zdir = XDir(), YDir(), ZDir()
-    rh = 0
-    #rx = ry = rz = 1
+    rphi = 1
+    rx = ry = rz = 1
 
     for iteration ∈ 1:iterations
         time = iteration
@@ -263,13 +270,15 @@ function FilmModel(
         # h calculations
         flux!(mdotf, Uf, config)
 
-        @. rho_mdotf =  mdotf.values .* rho.values
+        #@. rho_mdotf =  mdotf.values .* rho.values
         
 
-        @. prev = h.values
+        @. prev = phi.values
 
-        #rh = solve_equation!(h_eqn, h, boundaries.h, solvers.h, config)
-        #explicit_relaxation!(h, prev, solvers.h.relax, config)
+        rphi = solve_equation!(phi_eqn, phi, boundaries.phi, solvers.phi, config)
+        explicit_relaxation!(phi, prev, solvers.phi.relax, config)
+
+        @. h.values = phi.values / rho.values
 
         
         if (iteration == 1)
@@ -285,15 +294,15 @@ function FilmModel(
         
         #correct_mass_flux(mdotf, PL, rDf, config)
 
-        for i ∈ eachindex(h.values)
-            if (h.values[i]<=0) h.values[i] = 1e-18 end
+        for i ∈ eachindex(phi.values)
+            if (phi.values[i]<=0) phi.values[i] = 1e-18 end
         end
 
-        grad!(∇h, hf, h, boundaries.h, time, config)
+        grad!(∇h, hf, h, boundaries.phi, time, config)
         @. hmdotf.values = mdotf.values * hf.values * rho.values
         @. rhohf.values =  hf.values * rho.values
 
-        limit_gradient!(schemes.h.limiter, ∇h, h, config)
+        limit_gradient!(schemes.phi.limiter, ∇h, h, config)
         div!(Δh, ∇hf, config)
         interpolate!(Δhf, Δh, config)
         correct_boundaries!(Δhf, Δh, Δh_bc, time, config)
@@ -340,7 +349,7 @@ function FilmModel(
         R_ux[iteration] = rx
         R_uy[iteration] = ry
         R_uz[iteration] = rz
-        R_h[iteration] = rh
+        R_phi[iteration] = rphi
 
         Uz_convergence = true
         #if typeof(mesh)
@@ -348,7 +357,7 @@ function FilmModel(
         if (R_ux[iteration] <= solvers.U.convergence &&
             #R_uy[iteration] <= solvers.U.convergence &&
             Uz_convergence &&
-            R_h[iteration] <= solvers.h.convergence)
+            R_phi[iteration] <= solvers.phi.convergence)
 
             progress.n = iterations
             finish!(progress)
@@ -367,7 +376,7 @@ function FilmModel(
                 (:Ux, R_ux[iteration]),
                 (:Uy, R_uy[iteration]),
                 (:Uz, R_uz[iteration]),
-                (:h, R_h[iteration]),
+                (:h, R_phi[iteration]),
                 #turbulenceModel.state.residuals...
             ]
         )
@@ -381,7 +390,7 @@ function FilmModel(
 
     end # end for loop
 
-    return (Ux=R_ux, Uy=R_uy, Uz=R_uz, h=R_h)
+    return (Ux=R_ux, Uy=R_uy, Uz=R_uz, phi=R_phi)
 end
 
 function correct_mass_flux()
@@ -390,9 +399,12 @@ end
 # Reworked save_output for film model
 function save_output_film(model::Physics{T,F,SO,M,Tu,E,D,BI}, outputWriter, iteration, time, config
     ) where {T,F,SO,M,Tu,E,D,BI}
+    mesh = model.momentum.U.mesh
+    h = ScalarField(mesh)
+    @. h.values = model.momentum.phi.values / model.fluid.rho.values
     args = (
             ("U", model.momentum.U), 
-            ("h", model.momentum.h),
+            ("h", h),
         )
     
     write_results(iteration, time, model.domain, outputWriter, config.boundaries, args...)
@@ -400,9 +412,13 @@ end
 
 function save_output_film(model::Physics{T,F,SO,M,Tu,E,D,BI}, outputWriter, iteration, time, config, w
     ) where {T,F,SO,M,Tu,E,D,BI}
+    
+    mesh = model.momentum.U.mesh
+    h = ScalarField(mesh)
+    @. h.values = model.momentum.phi.values / model.fluid.rho.values
     args = (
             ("U", model.momentum.U), 
-            ("h", model.momentum.h),
+            ("h", h),
             ("w", w)
         )
     

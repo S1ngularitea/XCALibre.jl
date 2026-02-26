@@ -133,9 +133,9 @@ Adapt.@adapt_structure original
 
 struct EFM{V,S,Vf,Sf,SS,C} <: AbstractMomentumModel
     U::V
-    h::S
+    phi::S
     Uf::Vf
-    hf::Sf
+    phif::Sf
     sources::SS
     coeffs::C
 end
@@ -149,11 +149,11 @@ end
 
 (momentum::Momentum{EFM, ARG})(mesh::AbstractMesh) where ARG = begin
     U = VectorField(mesh)
-    h = ScalarField(mesh)
+    phi = ScalarField(mesh)
     Uf = FaceVectorField(mesh)
-    hf = FaceScalarField(mesh)
+    phif = FaceScalarField(mesh)
     coeffs = momentum.args
-    EFM(U, h, Uf, hf, nothing, coeffs)
+    EFM(U, phi, Uf, phif, nothing, coeffs)
 end
 
 

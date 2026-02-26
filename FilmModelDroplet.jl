@@ -4,8 +4,8 @@ using XCALibre
 
 grids_dir = pkgdir(XCALibre, "Test_Meshes/");
 
-#grid = "25x25_grid.unv"
-grid = "500x500_grid.unv"
+grid = "25x25_grid.unv"
+#grid = "500x500_grid.unv"
 mesh_file = joinpath(grids_dir, grid);
 
 mesh = UNV2D_mesh(mesh_file, scale=0.01);
@@ -49,7 +49,7 @@ BCs = assign(
             Wall(:outlet, [0.0, 0.0, 0.0]),
             Wall(:top, [0.0, 0.0, 0.0])
         ],
-        h = [
+        phi = [
             #Zerogradient(:inlet),
             #Zerogradient(:bottom),
             #Zerogradient(:outlet),
@@ -67,7 +67,7 @@ schemes = (
         time=Euler,
         divergence=Upwind
         ),
-    h = Schemes(
+    phi = Schemes(
         time=Euler,
         divergence=LUST
     ),
@@ -82,7 +82,7 @@ solvers = (
         rtol = 1e-4,
         atol = 1e-10
     ),
-    h = SolverSetup(
+    phi = SolverSetup(
         solver      = Bicgstab(), # Options: Cg(), Bicgstab(), Gmres()
         preconditioner = Jacobi(), # Options: NormDiagonal()
         convergence = 1e-7,
@@ -95,7 +95,8 @@ solvers = (
 #runtime = Runtime(iterations=2000, time_step=1, write_interval=2000)
 #runtime = Runtime(iterations=20000, time_step=1, write_interval=20000)
 #runtime = Runtime(iterations=20, time_step=1, write_interval=1); # hide
-runtime = Runtime(iterations=2000, time_step=1, write_interval=100)
+runtime = Runtime(iterations=2000, time_step=1, write_interval=1); # hide
+#runtime = Runtime(iterations=2000, time_step=1, write_interval=100)
 
 config = Configuration(
     solvers=solvers, schemes=schemes, runtime=runtime, hardware=hardware, boundaries=BCs);
@@ -103,12 +104,12 @@ config = Configuration(
 initialise!(model.momentum.U, [1e-4,1e-4,0]);
 
 h_init = h_crit/100;
-initialise!(model.momentum.h, h_init)
+initialise!(model.momentum.phi, h_init*rho_l)
 #h_min = 1e-4
 #factor = 1.5
 cells = mesh.cells;
-h = model.momentum.h;
-for i ∈ eachindex(h.values)
+phi = model.momentum.phi;
+for i ∈ eachindex(phi.values)
 #    #h.values[i] = -(h_inlet-h_min)/(0.01*2)*mesh.cells[i].centre[1]-(h_inlet-h_min)/(0.01*2)*2*abs(mesh.cells[i].centre[2]-0.005)+h_inlet
 #    a = h_inlet/2
 #    c = factor
@@ -116,10 +117,10 @@ for i ∈ eachindex(h.values)
 #    h.values[i] = a*exp(b*mesh.cells[i].centre[1]^c)#+a*exp(b*abs(mesh.cells[i].centre[2]-0.005)^c)
 #println(sqrt((0.005-mesh.cells[i].centre[1])^2+(0.005-mesh.cells[i].centre[2])^2+(0.005-mesh.cells[i].centre[3])^2))
     if sqrt((0.05-cells[i].centre[1])^2+(0.05-cells[i].centre[2])^2+(0.005-cells[i].centre[3])^2)<0.1^2
-        h.values[i] = 0.001
+        phi.values[i] = 0.001*rho_l
     end
 end
 
 residuals = run!(model, config);
 
-using Plots
+#using Plots
