@@ -154,7 +154,8 @@ function FilmModel(
         Extrapolated(:side_2)
     ]
     ∇h_bc = [
-        Dirichlet(:inlet, 0),
+        #Extrapolated(:inlet),
+        Dirichlet(:inlet,0),
         Dirichlet(:outlet,0),
         Dirichlet(:inlet_sides,0),
         Dirichlet(:top_of_plate,0),
@@ -279,9 +280,12 @@ function FilmModel(
     xdir, ydir, zdir = XDir(), YDir(), ZDir()
     #rh = 0
     #rx = ry = rz = rh = 1
+    dt_cpu = zeros(_get_float(mesh), 1)
+    copyto!(dt_cpu, config.runtime.dt)
 
     @time for iteration ∈ 1:iterations
-        time = iteration *dt
+        copyto!(dt_cpu, config.runtime.dt)
+        time += dt_cpu[1]
         
         @. prev_u = U.x.values
         @. prev_v = U.y.values
@@ -411,12 +415,15 @@ function FilmModel(
         #end
 
 
-        maxCourant = max_courant_number!(cellsCourant, model, config)
+        courant = max_courant_number!(cellsCourant, model, config)
+
+        update_dt!(config.runtime, courant)
         
         ProgressMeter.next!(
             progress, showvalues = [
-                (:time, iteration*runtime.dt),
-                (:Courant, maxCourant),
+                (:dt, dt_cpu[1]),
+                (:time, time),
+                (:Courant, courant),
                 (:Ux, R_ux[iteration]),
                 (:Uy, R_uy[iteration]),
                 (:Uz, R_uz[iteration]),

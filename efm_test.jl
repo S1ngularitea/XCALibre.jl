@@ -20,7 +20,7 @@ hardware = Hardware(backend=backend, workgroup=1024);
 mesh_dev = mesh; # use this line to run on CPU
 # mesh_dev = adapt(backend, mesh)  # Uncomment to run on GPU 
 
-test_case = 5;
+test_case = 8;
 input_parameters = CSV.File("Model_Input.csv"); #File containing the different test cases from paper "Modeling of Partially Wetting Liquid Film Using an Enhanced Thin Film Model for Aero-Engine Bearing Chamber Applications" by Kuldeep Singh et. al
 inlet_width = 0.510; # m
 inlet_height = 0.05; # m
@@ -59,9 +59,12 @@ BCs = assign(
             Dirichlet(:inlet, inlet_velocity),
             Extrapolated(:outlet),
             Wall(:inlet_sides, [0,0,0]),
-            Extrapolated(:top_of_plate),
-            Extrapolated(:side_1),
-            Extrapolated(:side_2)
+            Wall(:top_of_plate, [0,0,0]),
+            Wall(:side_1, [0,0,0]),
+            Wall(:side_2, [0,0,0]),
+            #Extrapolated(:top_of_plate),
+            #Extrapolated(:side_1),
+            #Extrapolated(:side_2)
         ],
         h = [
             Dirichlet(:inlet, inlet_height),
@@ -110,11 +113,19 @@ solvers = (
     )
 );
 
+adaptive = AdaptiveTimeStepping(; 
+    # keyword arguments
+
+    maxCo=0.75,
+    minShrink=0.5,
+    maxGrow=1.5
+)
+
 #runtime = Runtime(iterations=2000, time_step=1, write_interval=2000)
 #runtime = Runtime(iterations=20000, time_step=1, write_interval=20000)
 #runtime = Runtime(iterations=20, time_step=Δt, write_interval=1); # hide
 #runtime = Runtime(iterations=200, time_step=Δt, write_interval=10);
-runtime = Runtime(iterations=2000, time_step=Δt, write_interval=100)
+runtime = Runtime(iterations=2000, time_step=Δt, write_interval=100, adaptive=adaptive)
 #runtime = Runtime(iterations=8000, time_step=Δt, write_interval=400)
 #runtime = Runtime(iterations=100, time_step=Δt, write_interval=5)
 #runtime = Runtime(iterations=100000, time_step=Δt, write_interval=10000)
