@@ -153,6 +153,14 @@ function FilmModel(
         Extrapolated(:side_1),
         Extrapolated(:side_2)
     ]
+    ∇h_bc = [
+        Dirichlet(:inlet, 0),
+        Dirichlet(:outlet,0),
+        Dirichlet(:inlet_sides,0),
+        Dirichlet(:top_of_plate,0),
+        Dirichlet(:side_1,0),
+        Dirichlet(:side_2,0)
+    ]
     Δh_bc = [
         Extrapolated(:inlet),
         Extrapolated(:outlet),
@@ -216,6 +224,8 @@ function FilmModel(
     # Getting the laplacian of h for first U calculation
     grad!(∇h, hf, h, boundaries.h, time, config)
     limit_gradient!(schemes.h.limiter, ∇h, h, config)
+    interpolate!(∇hf, ∇h.result, config)
+    correct_boundaries!(∇hf, ∇h.result, ∇h_bc, time, config)
     div!(Δh, ∇hf, config)
     interpolate!(Δhf, Δh, config)
     correct_boundaries!(Δhf, Δh, Δh_bc, time, config)
@@ -330,6 +340,8 @@ function FilmModel(
         @. rhohf.values =  hf.values * rho.values
 
         limit_gradient!(schemes.h.limiter, ∇h, h, config)
+        interpolate!(∇hf, ∇h.result, config)
+        correct_boundaries!(∇hf, ∇h.result, ∇h_bc, time, config)
         div!(Δh, ∇hf, config)
         interpolate!(Δhf, Δh, config)
         correct_boundaries!(Δhf, Δh, Δh_bc, time, config)
