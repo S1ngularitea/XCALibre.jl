@@ -74,7 +74,7 @@ BCs = assign(
             Wall(:inlet_sides, [0,0,0]),
             Extrapolated(:top_of_plate),
             Extrapolated(:side_1),
-            Extrapolated(:side_2),
+            Extrapolated(:side_2)
             #Wall(:top_of_plate, [0,0,0]),
             #Wall(:side_1, [0,0,0]),
             #Wall(:side_2, [0,0,0]),
@@ -83,6 +83,14 @@ BCs = assign(
             Dirichlet(:inlet, inlet_height),
             Extrapolated(:outlet),
             Extrapolated(:inlet_sides),
+            Extrapolated(:top_of_plate),
+            Extrapolated(:side_1),
+            Extrapolated(:side_2)
+        ],
+        phi = [
+            Dirichlet(:inlet, inlet_flow_rate),
+            Extrapolated(:outlet),
+            Wall(:inlet_sides, [0,0,0]),
             Extrapolated(:top_of_plate),
             Extrapolated(:side_1),
             Extrapolated(:side_2)
@@ -123,6 +131,14 @@ solvers = (
         relax       = 0.8,
         rtol = 1e-4,
         atol = 1e-6
+    ),
+    phi = SolverSetup(
+        solver = Bicgstab(),
+        preconditioner = Jacobi(),
+        convergence = 1e-11,
+        relax = 1.0,
+        rtol = 1e-4,
+        atol=1e-5
     )
 );
 
