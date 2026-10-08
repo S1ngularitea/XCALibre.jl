@@ -2,7 +2,7 @@ using XCALibre
 using CSV
 # using CUDA # Uncomment to run on NVIDIA GPUs
 # using AMDGPU # Uncomment to run on AMD GPUs
-test_case = 8;
+test_case = 17;
 grids_dir = pkgdir(XCALibre, "Test_Meshes/");
 if test_case <= 8
     
@@ -93,13 +93,15 @@ XCALIBRE_EFM_FLUX_CORRECTION = get(ENV, "XCALIBRE_EFM_FLUX_CORRECTION", "1") != 
 
 σ = σ * EFM_SIGMA_SCALE
 
-inlet_rate = inlet_flow_rate/inlet_area; # m\s
-
+g = 9.81
+inlet_flow_per_width = inlet_flow_rate/inlet_width # m^2/s
+gravity_tangential = g*sind(ϕ)
+inlet_height = (3*nu*inlet_flow_per_width/gravity_tangential)^(1/3) # m, Nusselt estimate
+inlet_rate = inlet_flow_per_width/inlet_height # m/s
 inlet_velocity = inlet_rate.*[1.0, 0.0, 0.0];
-mu = 0.001003;
-rho_l = 998.2; # Density of water @ 43°C kg/m3
-#nu = 6.245e-7; # kinematic viscosity of water @ 43°c
-nu = mu/rho_l;
+gravity_vector = (g*sind(ϕ), 0.0, -g*cosd(ϕ))
+case_reynolds = inlet_rate*inlet_height/nu
+
 
 h_crit = 1e-10;
 h_floor = 1e-15
@@ -108,7 +110,7 @@ h_floor = 1e-15
 end;
 
 model = Physics(
-    momentum=Momentum{EFM}(;σ=σ, h_crit = h_crit, h_floor=h_floor, β=β, θm = θm, ϕ=ϕ),
+    momentum=Momentum{EFM}(;σ=σ, h_crit = h_crit, h_floor=h_floor, β=β, θm = θm, gravity=gravity_vector),
     time = Transient(),
     fluid = Fluid{Incompressible}(; nu = nu, rho = rho_l),
     turbulence = RANS{Laminar}(),
@@ -121,6 +123,7 @@ BCs = assign(
     (
         U = [
             Dirichlet(:inlet, inlet_velocity),
+            # Extrapolated(:inlet),
             Extrapolated(:outlet),
             Wall(:inlet_sides, [0,0,0]),
             Extrapolated(:top_of_plate),
@@ -142,10 +145,10 @@ schemes = (
     U = Schemes(
         time=Euler,
         divergence=Upwind
-        #divergence=LUST
-        ),
+    ),
     h = Schemes(
-        time=Euler
+        time=Euler,
+        divergence=LUST
     ),
 );
 
@@ -154,7 +157,6 @@ solvers = (
         solver      = Bicgstab(), # Options: Gmres()
         preconditioner = Jacobi(), # Options: NormDiagonal()
         convergence = 1e-11,
-        # relax       = 0.9,
         relax       = 1.0,
         rtol = 0.0,
         atol = 1e-8
@@ -163,7 +165,6 @@ solvers = (
         solver      = Bicgstab(), # Options: Cg(), Bicgstab(), Gmres()
         preconditioner = Jacobi(), # Options: NormDiagonal()
         convergence = 1e-11,
-        # relax       = 0.7,
         relax       = 1.0,
         rtol = 0.0,
         atol = 1e-8
@@ -179,6 +180,7 @@ adaptive = if EFM_ADAPTIVE
 else
     nothing
 end
+
 begin
 
 runtime = Runtime(
@@ -197,6 +199,6 @@ initialise!(model.momentum.U, [0,0,0]);
 h_init = h_floor;
 initialise!(model.momentum.h, h_init)
 
-residuals = run!(model, config, inner_loops=8);
+residuals = run!(model, config, inner_loops=2);
 
 end;
