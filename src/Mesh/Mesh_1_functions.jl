@@ -4,6 +4,7 @@ export bounding_box
 export boundary_info, boundary_map
 export total_boundary_faces, boundary_index
 export norm_static
+export wall_normal_distance
 export is_boundary
 export convert_mesh_float
 export validate_single_precision_mesh
@@ -12,7 +13,7 @@ export validate_single_precision_mesh
 
 _get_int(mesh) = eltype(mesh.get_int)
 _get_float(mesh) = eltype(mesh.get_float)
-_get_backend(mesh) = get_backend(mesh.cell_faces)
+_get_backend(mesh) = _active_backend(get_backend(mesh.cell_faces))
 
 _index_capacity_error(::Type{TI}, what) where TI = ArgumentError(
     "$what does not fit the mesh integer type $TI; read the mesh with integer_type=Int64")
@@ -34,9 +35,9 @@ end
 is_boundary(ownerCells::SVector{2,<:Integer}) = ownerCells[1] == ownerCells[2]
 is_boundary(face::Union{Face2D,Face3D}) = is_boundary(face.ownerCells)
 
-# Laplacian face coefficient. norm(((Sf.Sf)/(Sf.e))*e)/delta reduces to area/(|normal.e|*delta)
-# because ns cancels and normal and e are unit vectors. Boundary faces keep area/delta, which
-# is what every @define_boundary Laplacian block uses.
+# Laplacian face coefficient: norm(((Sf.Sf)/(Sf.e))*e)/delta reduces to area/(|normal.e|*delta).
+# Boundary faces keep area/delta (delta is already the floored wall-normal distance there),
+# as every @define_boundary Laplacian block does.
 _gDiff(ownerCells, normal, e, area, delta) = begin
     den = is_boundary(ownerCells) ? delta : abs(normal ⋅ e)*delta
     den > zero(den) ? area/den : zero(den)
@@ -46,6 +47,41 @@ _gDiff(face::Union{Face2D,Face3D}) =
     _gDiff(face.ownerCells, face.normal, face.e, face.area, face.delta)
 
 face_gDiff_coefficients(faces) = _gDiff.(faces)
+
+# boundary faces grouped by owner cell (cells ascending, faces ascending within a cell): kernels
+# adding boundary contributions run one work item per cell over its faces, so each cell sums them
+# in serial face order whatever the thread count (atomic face loops sum in arrival order)
+function boundary_cell_faces(boundary_cellsID::AbstractVector{I}) where I<:Integer
+    owners = Array(boundary_cellsID)
+    ncells = length(unique(owners))
+    cells, ranges = Vector{I}(undef, ncells), Vector{UnitRange{I}}(undef, ncells)
+    faces = Vector{I}(undef, length(owners))
+    boundary_cell_faces!(cells, ranges, faces, owners)
+    _like(boundary_cellsID, cells), _like(boundary_cellsID, ranges), _like(boundary_cellsID, faces)
+end
+
+# fills the grouping in place (reordering renumbers the cells but keeps the counts)
+function boundary_cell_faces!(cells, ranges, faces, owners)
+    I = eltype(faces)
+    perm = sortperm(owners; alg=MergeSort) # stable: faces stay ascending within a cell
+    j = 0
+    for k ∈ eachindex(perm)
+        f = perm[k]
+        faces[k] = I(f)
+        if k == 1 || owners[f] != owners[perm[k - 1]]
+            j += 1
+            cells[j] = owners[f]
+            ranges[j] = I(k):I(k)
+        else
+            ranges[j] = first(ranges[j]):I(k)
+        end
+    end
+    j == length(cells) || throw(ArgumentError("boundary cell count changed"))
+    cells, ranges, faces
+end
+
+_like(::Array, x::Array) = x
+_like(a, x) = copyto!(similar(a, eltype(x), length(x)), x)
 
 # the 3D readers build the mesh before filling the face geometry, so the array built with it
 # is refreshed once the geometry is final
@@ -77,14 +113,28 @@ weight_delta_e(C1F1, C2F1, C1C2, normal) = begin
     return weight, delta, e
 end
 
-# function to calculate boundary face properties
+# Boundary face properties: delta = (Cf - C)·n, floored at 5% of |Cf - C| to keep area/delta
+# bounded. On skewed boundary cells |Cf - C| overstates the normal distance that boundary
+# gradients and Laplacian coefficients need (wall functions use wall_normal_distance).
 weight_delta_e(C1F1, normal) = begin
     weight = one(eltype(C1F1))
-    delta = norm(C1F1)
-    e = delta > zero(delta) ? C1F1/delta : normal
+    distance = norm(C1F1)
+    e = distance > zero(distance) ? C1F1/distance : normal
+    delta = max(C1F1⋅normal, oftype(distance, 0.05)*distance)
     delta = max(delta, eps(one(delta))) # keep delta > 0 for degenerate faces (area is 0 there)
     return weight, delta, e
 end
+
+# Unfloored wall-normal distance |d| e·n for the wall functions (a floored y overestimates y+
+# and nu_t in thin, skewed near-wall cells). |d| is recovered from delta = |d| max(e·n, 0.05);
+# a 0.1% floor keeps the result positive.
+@inline wall_normal_distance(delta, e, normal) = begin
+    en = e⋅normal
+    distance = delta/max(en, oftype(delta, 0.05))
+    distance*max(en, oftype(delta, 0.001))
+end
+@inline wall_normal_distance(face::Union{Face2D,Face3D}) =
+    wall_normal_distance(face.delta, face.e, face.normal)
 
 # Orientation from cell topology (exact for any closed cell), not from estimated centres.
 # Returns (signs, ok): signs[i] = +1 if face i in stored order points out of the cell, else -1;
@@ -400,40 +450,20 @@ function get_boundaries(boundaries::AbstractGPUArray)
     return boundaries_cpu
 end
 
+"""
+    pmin, pmax = bounding_box(mesh)
+
+Return the corners of the axis-aligned box enclosing all mesh nodes as `SVector{3}`s of the
+mesh float type. On a distributed mesh the box encloses the nodes of all ranks.
+"""
 function bounding_box(mesh::AbstractMesh)
-    (; faces, face_nodes, nodes) = mesh
-    nbfaces = total_boundary_faces(mesh)
-
-    backend = get_backend(face_nodes)
+    (; node_coords) = mesh
     F = _get_float(mesh)
-
-    pmin = KernelAbstractions.zeros(backend, F, 3)
-    pmax = KernelAbstractions.zeros(backend, F, 3)
-
-    ndrange = nbfaces
-    workgroup = typeof(backend) <: CPU ? cld(nbfaces, Threads.nthreads()) : 32
-    kernel! = _bounding_box(backend, workgroup, ndrange)
-    kernel!(pmin, pmax, faces, face_nodes, nodes)
+    inf = SVector{3,F}(typemax(F), typemax(F), typemax(F))
+    pmin = reduce((a, b) -> min.(a, b), node_coords; init=inf)
+    pmax = reduce((a, b) -> max.(a, b), node_coords; init=-inf)
     return pmin, pmax
 end
-
-@kernel function _bounding_box(pmin, pmax, faces, face_nodes, nodes)
-    fID = @index(Global)
-    @inbounds face = faces[fID]
-    (; nodes_range) = face
-
-    @inbounds for nID ∈ @view face_nodes[nodes_range]
-        node = nodes[nID]
-        coords = node.coords
-        pmin[1] = min(pmin[1], coords[1])
-        pmin[2] = min(pmin[2], coords[2])
-        pmin[3] = min(pmin[3], coords[3])
-        pmax[1] = max(pmax[1], coords[1])
-        pmax[2] = max(pmax[2], coords[2])
-        pmax[3] = max(pmax[3], coords[3])
-    end
-end
-
 
 # function total_boundary_faces(mesh::Mesh2{I,F}) where {I,F}
 function total_boundary_faces(mesh::AbstractMesh)

@@ -4,6 +4,9 @@ using SparseArrays
 using SparseMatricesCSR
 using StaticArrays 
 using Statistics
+using Random
+using Interpolations: linear_interpolation
+using FFTW
 using Test
 
 workgroupsize(mesh) = length(mesh.cells) ÷ Threads.nthreads()
@@ -16,6 +19,18 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
         include("test_mesh_conversion.jl")
     end
 
+    @testset "Padded neighbour list" begin
+        include("unit_test_foam_padded_neighbour.jl")
+    end
+
+    @testset "OpenFOAM output of fields without boundary conditions" begin
+        include("unit_test_foam_writer_unset_bcs.jl")
+    end
+
+    @testset "Mesh reordering" begin
+        include("unit_test_mesh_reorder.jl")
+    end
+
     @testset "Face orientation" begin
         include("unit_test_face_orientation.jl")
     end
@@ -26,6 +41,26 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
 
     @testset "Physical boundary conditions" begin
         include("test_physical_boundary_conditions.jl")
+    end
+
+    @testset "Second-order upwind divergence schemes" begin
+        include("unit_test_linear_upwind.jl")
+    end
+
+    @testset "LUST in deferred-correction form (LUSTDC)" begin
+        include("unit_test_lustdc.jl")
+    end
+
+    @testset "LUST with explicit upwind correction (LUSTLU)" begin
+        include("unit_test_lustlu.jl")
+    end
+
+    @testset "Least-squares gradient" begin
+        include("unit_test_least_squares.jl")
+    end
+
+    @testset "Venkatakrishnan gradient limiter" begin
+        include("unit_test_venkat_limiter.jl")
     end
 
     @testset "Potential-flow initialisation" begin
@@ -42,6 +77,10 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
 
     @testset "DILU" begin
         include("test_DILU.jl")
+    end
+
+    @testset "Bounding box and LES Empty distance" begin
+        include("unit_test_bounding_box.jl")
     end
 
     @testset "AMG preconditioner freeze" begin
@@ -62,8 +101,28 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
         include("unit_test_xvector.jl")
     end
 
+    @testset "Kernel index binding" begin
+        include("unit_test_kernel_index_pattern.jl")
+    end
+
     @testset "Laplace Unit Test" begin
         include("unit_test_laplace.jl")
+    end
+
+    @testset "Δt-consistent face flux" begin
+        include("unit_test_dt_consistent_flux.jl")
+    end
+
+    @testset "Crank-Nicolson temporal accuracy" begin
+        include("unit_test_crank_nicolson.jl")
+    end
+
+    @testset "Periodic mass flux" begin
+        include("unit_test_periodic_mass_flux.jl")
+    end
+
+    @testset "Transient verification examples" begin
+        include("unit_test_transient_verification_examples.jl")
     end
 
     @testset "Neumann Laplacian Sign Unit Test" begin
@@ -72,6 +131,18 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
 
     @testset "BiCGStab shadow vector" begin
         include("unit_test_bicgstab_shadow.jl")
+    end
+
+    @testset "Krylov shadow-vector breakdown" begin
+        include("unit_test_krylov_breakdown.jl")
+    end
+
+    @testset "Mixed-precision linear solves" begin
+        include("unit_test_mixed_precision.jl")
+    end
+
+    @testset "Unconverged linear solves warn" begin
+        include("unit_test_solve_warning.jl")
     end
 
     @testset "Wall Distance Unit Test" begin
@@ -86,6 +157,10 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
     @testset "Parallel cell updates Unit Test" begin
         include("unit_test_parallel_cell_updates.jl")
     end
+
+    @testset "Deterministic boundary accumulation" begin
+        include("unit_test_boundary_accumulation.jl")
+    end
   
     @testset "KOmegaLKE Diffusion Unit Test" begin
         include("unit_test_lke_diffusion.jl")
@@ -99,12 +174,44 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
         include("unit_test_transpose_stress.jl")
     end
 
+    @testset "Face compressibility at the solver time" begin
+        include("unit_test_thermo_psi_time.jl")
+    end
+
+    @testset "Viscous work of the enthalpy equation" begin
+        include("unit_test_viscous_work.jl")
+    end
+
+    @testset "Kinetic-energy flux of the enthalpy equation" begin
+        include("unit_test_kinetic_energy_flux.jl")
+    end
+
+    @testset "Run continuation" begin
+        include("unit_test_run_continuation.jl")
+    end
+
+    @testset "Compressible mass flux conservation" begin
+        include("unit_test_compressible_mass_flux.jl")
+    end
+
+    @testset "Consistent (SIMPLEC) coupling" begin
+        include("unit_test_consistent_coupling.jl")
+    end
+
+    @testset "Non-orthogonal correction flux continuity" begin
+        include("unit_test_nonorthogonal_flux.jl")
+    end
+
     @testset "setFields Function Unit Test" begin
         include("unit_test_setFields.jl")
     end
 
     @testset "Robin Boundary Condition Unit Test" begin
         include("unit_test_robin.jl")
+    end
+
+    @testset "Viscosity models" begin
+        include("unit_test_ViscosityModels.jl")
     end
 
     @testset "Fluid Properties Unit Test" begin
@@ -144,8 +251,14 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
         include("unit_test_field_average.jl")
         include("unit_test_field_rms.jl")
         include("unit_test_reynolds_stress.jl")
+        include("unit_test_qcriterion_window.jl")
         include("unit_test_post-process_transient.jl")
         include("unit_test_post-process_steady.jl")
+        include("unit_test_viscous_force_bcs.jl")
+    end
+
+    @testset "Probe" begin
+        include("unit_test_probe.jl")
     end
 
 
@@ -164,6 +277,7 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
             "3d_incompressible_laminar_cascade_periodic.jl",
             "2d_incompressible_pitzdaily_KEquation.jl",
             "2d_incompressible_pitzdaily_Smagorinsky.jl",
+            "3d_incompressible_isotropic_turbulence_WALE.jl",
             "2d_taylor_couette_laminar.jl"
         ]
 
@@ -190,6 +304,7 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
 
     @testset "Godunov Solver" begin
         include(joinpath(TEST_CASES_DIR, "2d_godunov_supersonic_cylinder.jl"))
+        include(joinpath(TEST_CASES_DIR, "2d_godunov_supersonic_cylinder_RANS.jl"))
     end
 
     @testset "Multiphase Solver" begin
@@ -207,6 +322,7 @@ TEST_CASES_DIR = pkgdir(XCALibre, "test/0_TEST_CASES")
 
     @testset "Thin Film Solver" begin
         include(joinpath(TEST_CASES_DIR, "2d_EFM.jl"))
+        include("unit_test_film_dt_consistency.jl")
     end
 
     @testset "Distributed (MPI)" begin
