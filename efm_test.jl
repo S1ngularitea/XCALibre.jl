@@ -2,21 +2,20 @@ using XCALibre
 using CSV
 # using CUDA # Uncomment to run on NVIDIA GPUs
 # using AMDGPU # Uncomment to run on AMD GPUs
-test_case = 17;
+test_case = 19;
 grids_dir = pkgdir(XCALibre, "Test_Meshes/");
+
+# Selecting the required mesh - CD1 is used for cases 1-8 as defined in:
+#
 if test_case <= 8
-    
-    grid = "initial_efm_mesh_CD1_2.unv";
+    grid = "initial_efm_mesh_CD1_3.unv";
 else
-    grid = "initial_efm_mesh_CD2_2.unv";
+    grid = "initial_efm_mesh_CD2_3.unv";
 end
 
 mesh_file = joinpath(grids_dir, grid);
 
 mesh = UNV2D_mesh(mesh_file, scale=0.001);
-
-
-
 
 # Select backend and setup hardware
 backend = CPU();
@@ -32,19 +31,15 @@ mesh_dev = mesh; # use this line to run on CPU
 begin # Model Info
 #test_case = 1;
 if isfile("Model_Input.csv")
-    #test_case = 19;
     input_parameters = CSV.File("Model_Input.csv"); #File containing the different test cases from paper "Modeling of Partially Wetting Liquid Film Using an Enhanced Thin Film Model for Aero-Engine Bearing Chamber Applications" by Kuldeep Singh et. al
 
     inlet_flow_rate = input_parameters.Q[test_case]; # m^3/s
-    β = input_parameters.Beta[test_case]; # empisical value from paper
-    #β = 5
+    β = input_parameters.Beta[test_case]; # empirical value from paper
+    #β = 2
     σ = input_parameters.Sigma[test_case]
     θm = input_parameters.Theta_m[test_case]
-    if input_parameters.Phi[test_case] == 90
-        ϕ = 89
-    else
-        ϕ = input_parameters.Phi[test_case]
-    end
+    
+    ϕ = input_parameters.Phi[test_case]
     
 else
     inlet_flow_rate = 25.53e-5
@@ -66,13 +61,13 @@ end
 # EFM_DT sets the requested initial time step.
 EFM_DT = parse(Float64, get(ENV, "EFM_DT", "5e-4"))
 # EFM_ITERS sets the number of solver iterations.
-EFM_ITERS = parse(Int, get(ENV, "EFM_ITERS", "20000"))
+EFM_ITERS = parse(Int, get(ENV, "EFM_ITERS", "40000"))
 # EFM_WRITE_INTERVAL sets output frequency; use -1 to disable writes.
 EFM_WRITE_INTERVAL = parse(Int, get(ENV, "EFM_WRITE_INTERVAL", "100"))
 # EFM_SIGMA_SCALE multiplies surface tension; use 0 to disable capillarity.
 EFM_SIGMA_SCALE = parse(Float64, get(ENV, "EFM_SIGMA_SCALE", "1"))
 # EFM_ADAPTIVE=1 enables adaptive time stepping from the limiting Courant number.
-EFM_ADAPTIVE = get(ENV, "EFM_ADAPTIVE", "0") != "0"
+EFM_ADAPTIVE = get(ENV, "EFM_ADAPTIVE", "1") != "0"
 # EFM_MAX_CO is the adaptive target for max ordinary/film Courant number.
 EFM_MAX_CO = parse(Float64, get(ENV, "EFM_MAX_CO", "0.1"))
 # EFM_MIN_SHRINK is the smallest adaptive dt multiplier per iteration.
@@ -93,6 +88,9 @@ XCALIBRE_EFM_FLUX_CORRECTION = get(ENV, "XCALIBRE_EFM_FLUX_CORRECTION", "1") != 
 
 σ = σ * EFM_SIGMA_SCALE
 
+mu = 0.001003;
+rho_l = 998.2; # Density of water @ 43°C kg/m3
+nu = mu/rho_l;
 g = 9.81
 inlet_flow_per_width = inlet_flow_rate/inlet_width # m^2/s
 gravity_tangential = g*sind(ϕ)
@@ -104,7 +102,7 @@ case_reynolds = inlet_rate*inlet_height/nu
 
 
 h_crit = 1e-10;
-h_floor = 1e-15
+h_floor = 1e-20
 
 Δt = EFM_DT # 5e-5
 end;
@@ -196,9 +194,12 @@ config = Configuration(
 GC.gc(true)
   
 initialise!(model.momentum.U, [0,0,0]);
-h_init = h_floor;
+h_init = 0;#h_floor;
 initialise!(model.momentum.h, h_init)
 
 residuals = run!(model, config, inner_loops=2);
 
 end;
+
+
+residuals = run!(model, config, inner_loops=2);

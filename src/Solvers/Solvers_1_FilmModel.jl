@@ -36,7 +36,8 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     h∇PL = VectorField(mesh)
     Ph = VectorField(mesh)
     τθw = VectorField(mesh)
-    Df = FaceScalarField(mesh)
+    corrf = FaceScalarField(mesh)
+    DivCorrector = ScalarField(mesh)
     
 
     @info "Defining models"
@@ -64,9 +65,9 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     h_eqn = (
         Time{schemes.h.time}(h)
         + Divergence{h_divergence}(filmVelocityFlux,h)
-        - Laplacian{schemes.h.laplacian}(Df,h)
+        #+ Divergence{h_divergence}(corrf,h)
         ==
-        - Source(surfaceFluxDiv)
+        - Source(DivCorrector)
         + Source(Sm)
     ) → ScalarEquation(h, boundaries.h)
 
@@ -80,7 +81,7 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     @reset U_eqn.solver = _workspace(solvers.U.solver, _b(U_eqn, XDir()), _index_type(_A(U_eqn)))
     @reset h_eqn.solver = _workspace(solvers.h.solver, _b(h_eqn), _index_type(_A(h_eqn)))
 
-    @info "Initialising turbulence model"
+    #@info "Initialising turbulence model"
     #p_eqn = (Time{schemes.h.time}(rho_l,h)==Source(Sm)) → ScalarEquation(h, boundaries.h)
     #turbulenceModel, config = initialise(model.turbulence, model, mdotf, p_eqn, config)
 
@@ -88,6 +89,8 @@ function setup_FilmModel_Solver(solver_variant, model, config;
         model, #turbulenceModel,
          U_eqn, h_eqn, config; output=output, inner_loops=inner_loops, progress=progress
     )
+
+    return residuals
 end
 
 function FilmModel(
@@ -120,8 +123,8 @@ function FilmModel(
     τθw = get_source(U_eqn,3)
 
     filmVelocityFlux = get_flux(h_eqn, 2)
-    Df = get_flux(h_eqn, 3)
-    surfaceFluxDiv = get_source(h_eqn, 1)
+    #corrf = get_flux(h_eqn, 3)
+    DivCorrector = get_source(h_eqn, 1)
 
     outputWriter = initialise_writer(output, model.domain)
 
@@ -153,9 +156,12 @@ function FilmModel(
     Hv = VectorField(mesh)
     rD = ScalarField(mesh)
     rDf = FaceScalarField(mesh)
+    Df = FaceScalarField(mesh)
     surfaceNormal = VectorField(mesh)
     gravityTangent = VectorField(mesh)
     gNormalf = FaceScalarField(mesh)
+    Corrector = VectorField(mesh)
+    Correctorf = FaceVectorField(mesh)
     
     initialise_film_geometry!(surfaceNormal, gravityTangent, gNormalf, G, config)
 
@@ -246,11 +252,11 @@ function FilmModel(
         
         inverse_diagonal!(rD, U_eqn, config)
         interpolate!(rDf, rD, config)
-        remove_film_pressure_source!(U_eqn, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rho.values[1], h, surfaceNormal, config)
+        remove_film_sources!(U_eqn, h, h∇PL, Ph, τθw, surfaceNormal, config)
 
         H!(Hv, U, U_eqn, config)
         correct_film_velocity!(
-            tempU, Hv, h, P_hydrf, P_surff, rD, rho.values[1],
+            tempU, Hv, h, h∇PL, Ph, τθw, rD, rho.values[1],
             surfaceNormal, config; include_hydrostatic=false, include_surface=false
         )
         rh = zero(TF)
@@ -258,7 +264,7 @@ function FilmModel(
             H!(Hv, tempU, U_eqn, config)
 
             correct_film_velocity!(
-                tempU, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho.values[1],
+                tempU, Hv, h, h∇PL, Ph, τθw, rD, rho.values[1],
                 surfaceNormal, config; include_hydrostatic=false, include_surface=false
             )
             update_film_fluxes!(
@@ -266,13 +272,18 @@ function FilmModel(
                 boundaries.U, boundaries.h, time, config, phif_U, profile_factor
             )
 
-            getDf!(Df, rDf, hf, wcf, gNormalf, config)
+            #getDf!(Df, rDf, hf, wcf, gNormalf, config)
             update_film_surface_flux!(
                 filmSurfaceFlux, rDf, hf, wf, w, filmVelocityFlux, boundaries.h,
                 P_surf, P_surff, rho.values[1], config
             )
-            div!(surfaceFluxDiv, filmSurfaceFlux, config)
+            #div!(surfaceFluxDiv, filmSurfaceFlux, config)
             
+            get_corrector!(Corrector, h, h∇PL, Ph, τθw, rD, config)
+            interpolate!(Correctorf, Corrector, config)
+            #correct_boundaries!(Correctorf, Corrector, )
+            div!(DivCorrector, Correctorf, config)
+
             copyto!(prev, h.values)
             rh = solve_film_h_equation!(h_eqn, h, h_old, boundaries.h, solvers.h, config, time=time)
 
@@ -291,15 +302,15 @@ function FilmModel(
                 boundaries.h, rho.values[1],
                 coeffs.σ, gNormalf, time, config
             )
-            getDf!(Df, rDf, hf, wcf, gNormalf, config)
+            #getDf!(Df, rDf, hf, wcf, gNormalf, config)
 
             correct_film_velocity!(
-                U, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho.values[1],
-                surfaceNormal, config; include_hydrostatic=true
+                U, Hv, h, h∇PL, Ph, τθw, rD, rho.values[1],
+                surfaceNormal, config;
             )
             correct_film_velocity!(
-                tempU, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho.values[1],
-                surfaceNormal, config; include_hydrostatic=false, include_surface=false
+                tempU, Hv, h, h∇PL, Ph, τθw, rD, rho.values[1],
+                surfaceNormal, config;
             )
             update_film_fluxes!(
                 phif, filmVelocityFlux, mdotf, Uf, tempU, hf, w, wf,
@@ -309,7 +320,16 @@ function FilmModel(
                 filmSurfaceFlux, rDf, hf, wf, w, filmVelocityFlux, boundaries.h,
                 P_surf, P_surff, rho.values[1], config
             )
-            correct_film_flux2!(phif, filmSurfaceFlux, Df, h_eqn, hf, w, wf, boundaries.h, time, config)
+            #correct_film_flux2!(phif, filmSurfaceFlux, Df, h_eqn, hf, w, wf, boundaries.h, time, config)
+            update_wetting_fields!(w, wf, h, internal_BCs.w, coeffs.h_crit, wetting_mode, time, config)
+
+            
+            update_film_viscous_source!(nu_h, nu, h, coeffs.h_floor, config)
+            grad!(∇w, wf, w, internal_BCs.w, time, config)
+            update_film_force_sources!(
+                Ph, h∇PL, τθw, h, ∇PL, ∇w, gravityTangent,
+                coeffs, rho.values[1], config
+            )
         end
 
         update_film_viscous_source!(nu_h, nu, h, coeffs.h_floor, config)
@@ -323,7 +343,7 @@ function FilmModel(
         apply_wetting_to_velocity!(U, w, config)
 
         correct_film_velocity!(
-            tempU, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho.values[1],
+            tempU, Hv, h, h∇PL, Ph, τθw, rD, rho.values[1],
             surfaceNormal, config; include_hydrostatic=false, include_surface=false
         )
         update_film_fluxes!(
@@ -768,6 +788,7 @@ function apply_film_boundary_flux_policy!(faceFlux, hBC, config)
     (; hardware) = config
     (; backend, workgroup) = hardware
 
+
     ndrange = length(hBC.IDs_range)
     kernel! = _apply_film_outflow_boundary_flux_policy!(backend)
     kernel!(faceFlux, hBC.IDs_range;
@@ -1186,24 +1207,7 @@ end
 end
 
 function correct_film_velocity!(
-    U, Hv, h, P_hydrf, P_surff, rD, rho, surfaceNormal, config;
-    include_hydrostatic=true, include_surface=true
-)
-    if !include_hydrostatic && !include_surface
-        copy_projected_vector_field!(U, Hv, surfaceNormal, config)
-        return nothing
-    end
-
-    ∇P_hydr = Grad{Gauss}(P_hydrf)
-    ∇P_surf = Grad{Gauss}(P_surff)
-    correct_film_velocity!(
-        U, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho, surfaceNormal, config;
-        include_hydrostatic=include_hydrostatic, include_surface=include_surface
-    )
-end
-
-function correct_film_velocity!(
-    U, Hv, h, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rD, rho, surfaceNormal, config;
+    U, Hv, h, h∇PL, Ph, τθw, rD, rho, surfaceNormal, config;
     include_hydrostatic=true, include_surface=true
 )
     if !include_hydrostatic && !include_surface
@@ -1214,18 +1218,11 @@ function correct_film_velocity!(
     (; hardware) = config
     (; backend, workgroup) = hardware
 
-    if include_hydrostatic
-        grad!(∇P_hydr, P_hydrf, config)
-    end
-    if include_surface
-        grad!(∇P_surf, P_surff, config)
-    end
 
     ndrange = length(U)
     kernel! = _sized(_correct_film_velocity!, backend, workgroup, ndrange)
-    hydrostatic_scale = include_hydrostatic ? one(rho) : zero(rho)
-    surface_scale = include_surface ? one(rho) : zero(rho)
-    kernel!(U, Hv, h, rD, ∇P_hydr, ∇P_surf, surfaceNormal, rho, hydrostatic_scale, surface_scale)
+    
+    kernel!(U, Hv, h, rD, h∇PL, Ph, τθw, surfaceNormal, rho)
 end
 
 function copy_projected_vector_field!(dest, src, surfaceNormal, config)
@@ -1267,15 +1264,13 @@ end
 end
 
 @kernel function _correct_film_velocity!(
-    U, Hv, h, rD, ∇P_hydr, ∇P_surf, surfaceNormal, rho, hydrostatic_scale, surface_scale
+    U, Hv, h, rD, h∇PL, Ph, τθw, surfaceNormal, rho
 )
     i = @index(Global)
 
     @inbounds begin
         n = surfaceNormal[i]
-        pressure_gradient = hydrostatic_scale*∇P_hydr.result[i] + surface_scale*∇P_surf.result[i]
-        pressure_gradient -= (pressure_gradient ⋅ n) * n
-        value = Hv[i] + pressure_gradient * h[i] * rD[i] / rho
+        value = Hv[i] + rD[i] * (-h∇PL[i] + Ph[i] + τθw[i])
         U[i] = value - (value ⋅ n) * n
     end
 end
@@ -1433,5 +1428,49 @@ end
             flux_sum += abs(phif[fID]) / h_scale
         end
         cellsFilmCourant[cID] = runtime.dt[1] * flux_sum / cells[cID].volume
+    end
+end
+
+function get_corrector!(Corrector, h, h∇PL, Ph, τθw, rD, config)
+    (; hardware, runtime) = config
+    (; backend, workgroup) = hardware
+
+    ndrange = length(h.values)
+    kernel! = _sized(_get_corrector!, backend, workgroup, ndrange)
+    kernel!(Corrector, h, h∇PL, Ph, τθw, rD)
+end
+
+@kernel function _get_corrector!(Corrector, h, h∇PL, Ph, τθw, rD)
+    cID = @index(Global)
+
+    @inbounds begin
+        Corrector[cID] = h[cID] * rD[cID] * (-h∇PL[cID] + Ph[cID] + τθw[cID])
+    end
+end
+
+function remove_film_sources!(U_eqn, h, h∇PL, Ph, τθw, surfaceNormal, config)
+    (; hardware) = config
+    (; backend, workgroup) = hardware
+    cells = get_phi(U_eqn).mesh.cells
+    (; bx, by, bz) = U_eqn.equation
+
+    ndrange = length(h)
+    kernel! = _sized(_remove_film_sources!, backend, workgroup, ndrange)
+    kernel!(cells, h, h∇PL, Ph, τθw, surfaceNormal, bx, by, bz)
+    # # KernelAbstractions.synchronize(backend)
+end
+
+@kernel function _remove_film_sources!(cells, h, h∇PL, Ph, τθw, surfaceNormal, bx, by, bz)
+    i = @index(Global)
+
+    @inbounds begin
+        (; volume) = cells[i]
+        n = surfaceNormal[i]
+        sources = -h∇PL[i] + Ph[i] + τθw[i]
+        sources -= (sources ⋅ n) * n
+        source = sources * volume
+        bx[i] -= source[1]
+        by[i] -= source[2]
+        bz[i] -= source[3]
     end
 end

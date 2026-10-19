@@ -27,14 +27,26 @@ case_19_xcal_x = case_19_xcal_file.var"Points:1"
 case_19_xcal_h = case_19_xcal_file.var"h"*1e6
 case_19_xcal_z_w = case_19_xcal_x/0.1016
 
+case_19_xcal_updated_file = CSV.File("mesh_study/Case_19_updated.csv")
+case_19_xcal_updated_x = case_19_xcal_updated_file.var"Points:1"
+case_19_xcal_updated_h = case_19_xcal_updated_file.var"h"*1e6
+case_19_xcal_updated_z_w = case_19_xcal_updated_x/0.1016
+
+case_19_xcal_updated_new_file = CSV.File("mesh_study/Case_19_updated-new.csv")
+case_19_xcal_updated_new_x = case_19_xcal_updated_new_file.var"Points:1"
+case_19_xcal_updated_new_h = case_19_xcal_updated_new_file.var"h"*1e6
+case_19_xcal_updated_new_z_w = case_19_xcal_updated_new_x/0.1016
+
 plot(case_17_cfd_z_w, case_17_cfd_h, label = "lan et al. VoF CFD", legend=:bottom)
 plot!(case_17_experimental_z_w, case_17_experimental_h, label = "lan et al. Experimental")
 plot!(case_17_xcal_z_w, case_17_xcal_h, label = "XCALibre results")
 xlabel!("z/W")
 ylabel!("h (μm)")
 
-plot(case_19_cfd_z_w, case_19_cfd_h, label = "lan et al. VoF CFD", legend=:bottom)
-plot!(case_19_experimental_z_w, case_19_experimental_h, label = "lan et al. Experimental")
-plot!(case_19_xcal_z_w, case_19_xcal_h, label = "XCALibre results")
+plot(case_19_cfd_z_w, case_19_cfd_h, label = "lan et al. VoF CFD", legend=:bottom, linestyle=:dash)
+plot!(case_19_experimental_z_w, case_19_experimental_h, label = "lan et al. Experimental", markershape=:X)
+#plot!(case_19_xcal_z_w, case_19_xcal_h, label = "XCALibre results")
+plot!(case_19_xcal_updated_z_w, case_19_xcal_updated_h, label = "XCALibre results - old")
+plot!(case_19_xcal_updated_new_z_w, case_19_xcal_updated_new_h, label = "XCALibre results - new", linestyle=:dashdot)
 xlabel!("z/W")
 ylabel!("h (μm)")
