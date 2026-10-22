@@ -38,7 +38,8 @@ model = Physics(
         nu = Viscosity{SutherlandViscosity}(mu_ref=mu_ref, T_ref=T_ref, S=S),
         cp = cp,
         gamma = gamma,
-        Pr = Pr
+        Pr = Pr,
+        cp=cp
         ),
     turbulence = RANS{Laminar}(),
     energy = Energy{SensibleEnthalpy}(Tref=288.15),
@@ -102,7 +103,7 @@ schemes = (
     he = Schemes(divergence=LUST, gradient=Gauss)
 )
 
-runtime = Runtime(iterations=500, write_interval=100, time_step=1)
+runtime = Runtime(iterations=5000, write_interval=100, time_step=1)
 
 config = Configuration(
     solvers=solvers, schemes=schemes, runtime=runtime, hardware=hardware, boundaries=BCs)

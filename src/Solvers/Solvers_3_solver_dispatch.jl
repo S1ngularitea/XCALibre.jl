@@ -251,7 +251,7 @@ This function returns a `NamedTuple` for accessing the residuals (e.g. `residual
 run!(
     model::Physics{T,F,S,M,Tu,E,D,BI}, config; 
     output=VTK(), pref=nothing, ncorrectors=0, inner_loops=2, progress=true
-    ) where{T<:Transient,F<:Incompressible,S,M<:EFM,Tu,E,D,BI} = 
+    ) where{T<:Transient,F,S,M<:EFM,Tu,E,D,BI} = 
 begin
     
     residuals=filmModel!(
@@ -267,7 +267,7 @@ run!(
     output=VTK(), pref=nothing, ncorrectors=0, inner_loops=2, progress=true,
     petsc_options="", restart=nothing,
     transpose_stress=true
-    ) where{T<:Transient,F<:Incompressible,S,M,Tu,E,D,BI} =
+    ) where{T<:Transient,F<:Incompressible,S,M<:original,Tu,E,D,BI} =
 begin
     residuals = piso!(
         model, config,
@@ -380,10 +380,10 @@ This function returns a `NamedTuple` for accessing the residuals (e.g. `residual
 - `e`   - Vector of energy residuals for each iteration.
 """
 run!(
-    model::Physics{T,F,M,Tu,E,D,BI}, config;
+    model::Physics{T,F,S,M,Tu,E,D,BI}, config;
     output=VTK(), pref=nothing, ncorrectors=0, inner_loops=2, outer_loops=1, progress=true,
     transpose_stress=true
-    ) where{T<:Transient,F<:WeaklyCompressible,M,Tu,E,D,BI} = 
+    ) where{T<:Transient,F<:WeaklyCompressible,S,M<:original,Tu,E,D,BI} = 
 begin
     residuals = cpiso!(
         model, config, 

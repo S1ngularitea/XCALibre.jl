@@ -23,6 +23,7 @@ function setup_FilmModel_Solver(solver_variant, model, config;
 
     (; solvers, schemes, boundaries) = config
 
+    @info "ETFM - Caution"
     @info "Extracting configuration and input fields..."
 
     (; U, h) = model.momentum
@@ -40,6 +41,8 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     Ph = VectorField(mesh)
     τθw = VectorField(mesh)
     Df = FaceScalarField(mesh)
+    
+    mdotf = FaceScalarField(mesh)
     
 
     @info "Defining models"
@@ -83,19 +86,30 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     @reset U_eqn.solver = _workspace(solvers.U, U_eqn, XDir())
     @reset h_eqn.solver = _workspace(solvers.h, h_eqn)
 
+    @info "Initialising energy model"
+    (;rho) = model.fluid
+    rho_l=rho.values[1]
+    if isnothing(model.energy)
+        energyModel = nothing
+    else
+        energyModel = initialise(model.energy, model, phif_U, config)
+    end
+
     @info "Initialising turbulence model"
     #p_eqn = (Time{schemes.h.time}(rho_l,h)==Source(Sm)) → ScalarEquation(h, boundaries.h)
     #turbulenceModel, config = initialise(model.turbulence, model, mdotf, p_eqn, config)
 
     residuals = solver_variant(
-        model, #turbulenceModel,
-         U_eqn, h_eqn, config; output=output, inner_loops=inner_loops, progress=progress
+        model, energyModel,#turbulenceModel,
+         U_eqn, h_eqn, mdotf, config; output=output, inner_loops=inner_loops, progress=progress
     )
+
+    return residuals
 end
 
 function FilmModel(
-    model, #turbulenceModel,
-     U_eqn, h_eqn, config;
+    model, energyModel,#turbulenceModel,
+     U_eqn, h_eqn, mdotf, config;
     output=VTK(), ncorrectors=0, inner_loops=2, progress=true
 )
     (; U, h, Uf, hf, coeffs) = model.momentum
@@ -133,7 +147,7 @@ function FilmModel(
     G = coeffs.gravity
 
     # Define aux fields
-    mdotf = FaceScalarField(mesh)
+    #mdotf = FaceScalarField(mesh)
     filmSurfaceFlux = FaceScalarField(mesh)
     PLf = FaceScalarField(mesh)
     ∇PL = Grad{Gauss}(PLf)
@@ -159,6 +173,10 @@ function FilmModel(
     surfaceNormal = VectorField(mesh)
     gravityTangent = VectorField(mesh)
     gNormalf = FaceScalarField(mesh)
+
+    mu = ScalarField(mesh)
+
+    gradU = Grad{schemes.U.gradient}(U)
     
     initialise_film_geometry!(surfaceNormal, gravityTangent, gNormalf, G, config)
 
@@ -215,6 +233,9 @@ function FilmModel(
     )
     copyto!(dt_cpu, config.runtime.dt)
 
+    #update_viscosity!(model.fluid, model.energy, config)
+    @. mu.values = nu.values * rho.values
+
     update_film_viscous_source!(nu_h, nu, h, coeffs.h_floor, config)
     update_liquid_pressure!(PLf, P_hydrf, P_surff, Pg, config)
 
@@ -243,10 +264,16 @@ function FilmModel(
         step_dt = dt_cpu[1]
 
         copyto!(h_old, h.values) # store previous h before inner loop
+        #@. model.energy.prevRhoK = rho.values*0.5*(U.x.values^2 + U.y.values^2)
+        #@. model.energy.prevP = h.values;#P_hydr + P_surf
 
         rx, ry, rz = solve_equation!(U_eqn, U, boundaries.U, solvers.U, xdir, ydir, zdir, config, time=time)
         project_vector_field_to_surface!(U, surfaceNormal, config)
         
+        # ∇p term in energy!() isn't used so ∇w has been used to satisfy the function
+        #energy!(energyModel, model,mdotf, ∇w, gradU, mu, time, dt_cpu[1], config)
+        
+
         inverse_diagonal!(rD, U_eqn, config)
         interpolate!(rDf, rD, config)
         remove_film_pressure_source!(U_eqn, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rho.values[1], h, surfaceNormal, config)
@@ -336,6 +363,10 @@ function FilmModel(
         # of the last inner loop), not by a flux rebuilt from H/a_P.
         scale_face_flux!(phif_U, phif, profile_factor, config)
 
+        if !isnothing(model.energy)
+            energy!(energyModel, model, phif_U, w, time, config)
+        end
+
         grad!(∇w, wf, w, internal_BCs.w, time, config)
         update_film_force_sources!(
             Ph, h∇PL, τθw, h, ∇PL, ∇w, gravityTangent,
@@ -353,23 +384,38 @@ function FilmModel(
         update_capillary_dt!(
             config.runtime, capillaryDtFaces, mesh, hf, wf, rho.values[1], coeffs, config
         )
-
-        isnothing(bar) || ProgressMeter.next!(
+        if isnothing(energyModel)
+            isnothing(bar) || ProgressMeter.next!(
+                bar, showvalues = [
+                    (:time, time),
+                    (:dt, step_dt),
+                    (:Co, limitingCourant),
+                    (:U, R_u[iteration]),
+                    (:h, R_h[iteration]),
+                #turbulenceModel.state.residuals...
+            ]
+        )
+        else
+            isnothing(bar) || ProgressMeter.next!(
             bar, showvalues = [
                 (:time, time),
                 (:dt, step_dt),
                 (:Co, limitingCourant),
                 (:U, R_u[iteration]),
                 (:h, R_h[iteration]),
-                #turbulenceModel.state.residuals...
+                energyModel.state.residuals
             ]
         )
+        end
 
         #runtime_postprocessing!(postprocess, iteration, iterations)
 
         if iteration % write_interval + signbit(write_interval) == 0
-
-            save_output(model, outputWriter, iteration, time, config, w)
+            if isnothing(energyModel)
+                save_output(model, outputWriter, iteration, time, config, w)
+            else
+                save_output(model, outputWriter, iteration, time, config, w, model.energy.Te)
+            end
             save_postprocessing(postprocess, iteration, time, mesh, outputWriter, config.boundaries)
         end
 
@@ -849,6 +895,19 @@ function ModelPhysics.save_output(
     args = (
             ("U", model.momentum.U), 
             ("h", model.momentum.h),
+            ("w", w)
+        )
+    
+    write_results(iteration, time, model.domain, outputWriter, config.boundaries, args...)
+end
+
+function ModelPhysics.save_output(
+    model::Physics{T,F,SO,M,Tu,E,D,BI}, outputWriter, iteration, time, config, w, Te
+    ) where {T,F,SO,M<:EFM,Tu, E<:FilmEnergy,D,BI}
+    args = (
+            ("U", model.momentum.U), 
+            ("h", model.momentum.h),
+            ("T", model.energy.Te),
             ("w", w)
         )
     

@@ -1,4 +1,4 @@
-export SensibleEnthalpy, InternalEnergy
+export SensibleEnthalpy, InternalEnergy, FilmEnergy
 export temperature_to_energy!, energy_to_temperature!, thermo_Psi!, energy_clamp!
 
 # Model type definitions
@@ -89,6 +89,13 @@ end
 
 # Functor constructors
 (energy::Energy{EnergyModel, ARG})(mesh, fluid) where {EnergyModel,ARG} = begin
+    if EnergyModel==FilmEnergy
+        T = ScalarField(mesh)
+        Tf = FaceScalarField(mesh)
+        coeffs = energy.args
+        
+        return EnergyModel(T, Tf, coeffs)
+    end
     backend = _get_backend(mesh)
     float_type = _get_float(mesh)
     n_cells = length(mesh.cells)
@@ -693,4 +700,99 @@ end
     G = gradU[i]
     divU = G[1,1] + G[2,2] + G[3,3]
     S[i] = p[i] * divU
+end
+
+struct FilmEnergyEquationModel{E1, State}
+    energy_eqn::E1
+    state::State
+end
+
+struct FilmEnergy{S, fS, C} <: AbstractEnergyModel
+    Te::S
+    Tf::fS
+    coeffs::C
+end
+Adapt.@adapt_structure FilmEnergy
+
+Energy{FilmEnergy}(; Tref) = begin
+    coeffs= (Tref=Tref)
+    ARG = typeof(coeffs)
+    Energy{FilmEnergy, ARG}(coeffs)
+end
+
+function initialise(energy::Union{FilmEnergy}, model::Physics{Ti,F,S,M,Tu,E,D,BI}, phif, config) where{Ti,F,S,M<:EFM,Tu,E,D,BI}
+
+    (; Te) = energy
+    (; solvers, schemes, runtime, boundaries) = config
+
+    mesh = model.domain
+    rhs = ScalarField(mesh)
+    (; h) = model.momentum
+
+    energy_eqn = (
+        Time{schemes.T.time}(h, Te)
+        + Divergence{schemes.T.divergence}(phif, Te)
+        ==
+        Source(rhs)
+    ) → ScalarEquation(Te, boundaries.T)
+
+    @reset energy_eqn.preconditioner = set_preconditioner(solvers.T, energy_eqn)
+    @reset energy_eqn.solver = _workspace(solvers.T, energy_eqn)
+
+    init_residual = (:Te, 1.0)
+    state = ModelState(init_residual, false)
+
+    return FilmEnergyEquationModel(energy_eqn, state)
+end
+
+function energy!(energy::FilmEnergyEquationModel, model::Physics{Ti,F,S,M,Tu,E,D,BI}, phif, w, time, config
+    ) where {Ti,F,S,M<:EFM,Tu,E,D,BI}
+
+    mesh = model.domain
+    (; energy_eqn, state) = energy
+    (; solvers, boundaries) = config
+
+    (; rho) = model.fluid
+    (; h) = model.momentum
+    (; Te, coeffs) = model.energy
+
+    hUf = get_flux(energy_eqn, 2)
+
+    @. hUf.values = phif.values
+
+    discretise!(energy_eqn, Te, config; time)
+    apply_boundary_conditions!(energy_eqn, boundaries.T, nothing, time, config)
+    update_preconditioner!(energy_eqn.preconditioner, mesh, config)
+    T_res = solve_system!(energy_eqn, solvers.T, Te, nothing, config)
+    #T_res = solve_equation!(energy_eqn, Te, boundaries.T, solvers.T, config)
+    residuals = (:Te, T_res)
+    converged = T_res <= solvers.T.convergence
+    state.residuals = residuals
+    state.converged = converged
+
+    T_ref=coeffs
+    adjust_for_film_wetting!(Te, w, T_ref, config)
+
+    return nothing
+end
+
+function adjust_for_film_wetting!(Te, w, T_ref, config)
+    (; mesh) = Te
+    (; hardware) = config
+    (; backend, workgroup) = hardware
+
+    nDrange = length(mesh.cells)
+    cell_kernel! = _sized(_adjust_for_film_wetting!, backend, workgroup, nDrange)
+    cell_kernel!(Te, w, T_ref)
+end
+
+@kernel function _adjust_for_film_wetting!(Te, w, T_ref)
+    cID = @index(Global)
+
+    @inbounds begin
+        Te[cID] *= w[cID]
+        if Te[cID] == 0
+            Te[cID] = T_ref
+        end
+    end
 end

@@ -96,7 +96,7 @@ struct Momentum{T, ARG} <: AbstractMomentumContainer
 end
 
 
-@kwdef struct regular{V,S,Vf,Sf,SS} <: AbstractMomentumModel
+@kwdef struct original{V,S,Vf,Sf,SS} <: AbstractMomentumModel
     U::V 
     p::S 
     Uf::Vf 
@@ -114,9 +114,9 @@ original(mesh::AbstractMesh) = begin
     pf = FaceScalarField(mesh)
     mdotf = FaceScalarField(mesh)
     fill!(mdotf.values, NaN) # no flux stored yet
-    regular(U, p, Uf, pf, nothing, mdotf, VectorField(mesh), ScalarField(mesh))
+    original(U, p, Uf, pf, nothing, mdotf, VectorField(mesh), ScalarField(mesh))
 end
-Adapt.@adapt_structure regular 
+Adapt.@adapt_structure original 
 
 
 

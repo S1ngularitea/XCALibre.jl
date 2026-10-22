@@ -608,7 +608,7 @@ restart_flux!(mesh, mdotf, restart, config) = restart_fields!(mesh, nothing, res
 # untouched since; otherwise (first run, initialise!, failed run) the flux stays rebuilt from U.
 continue_flux!(mdotf, momentum, mesh, ::Nothing) = nothing
 continue_flux!(mdotf, momentum, mesh, restart) = nothing # results read from file take precedence
-function continue_flux!(mdotf, momentum::ModelPhysics.regular, mesh, ::Nothing)
+function continue_flux!(mdotf, momentum::ModelPhysics.original, mesh, ::Nothing)
     (; U, p, Umdot, pmdot) = momentum
     fresh = U.x.values == Umdot.x.values && U.y.values == Umdot.y.values &&
         U.z.values == Umdot.z.values && p.values == pmdot.values &&
@@ -619,7 +619,7 @@ function continue_flux!(mdotf, momentum::ModelPhysics.regular, mesh, ::Nothing)
 end
 
 store_flux!(momentum, mdotf) = nothing
-function store_flux!(momentum::ModelPhysics.regular, mdotf)
+function store_flux!(momentum::ModelPhysics.original, mdotf)
     (; U, p, Umdot, pmdot) = momentum
     copyto!(momentum.mdotf.values, mdotf.values)
     copyto!(Umdot.x.values, U.x.values); copyto!(Umdot.y.values, U.y.values)
