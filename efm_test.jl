@@ -2,7 +2,7 @@ using XCALibre
 using CSV
 # using CUDA # Uncomment to run on NVIDIA GPUs
 # using AMDGPU # Uncomment to run on AMD GPUs
-test_case = 19;
+test_case = 14;
 grids_dir = pkgdir(XCALibre, "Test_Meshes/");
 
 # Selecting the required mesh - CD1 is used for cases 1-8 as defined in:
@@ -10,7 +10,7 @@ grids_dir = pkgdir(XCALibre, "Test_Meshes/");
 if test_case <= 8
     grid = "initial_efm_mesh_CD1_3.unv";
 else
-    grid = "initial_efm_mesh_CD2_3.unv";
+    grid = "initial_efm_mesh_CD2_2.unv";
 end
 
 mesh_file = joinpath(grids_dir, grid);
@@ -61,9 +61,9 @@ end
 # EFM_DT sets the requested initial time step.
 EFM_DT = parse(Float64, get(ENV, "EFM_DT", "5e-4"))
 # EFM_ITERS sets the number of solver iterations.
-EFM_ITERS = parse(Int, get(ENV, "EFM_ITERS", "40000"))
+EFM_ITERS = parse(Int, get(ENV, "EFM_ITERS", "80000"))
 # EFM_WRITE_INTERVAL sets output frequency; use -1 to disable writes.
-EFM_WRITE_INTERVAL = parse(Int, get(ENV, "EFM_WRITE_INTERVAL", "100"))
+EFM_WRITE_INTERVAL = parse(Int, get(ENV, "EFM_WRITE_INTERVAL", "500"))
 # EFM_SIGMA_SCALE multiplies surface tension; use 0 to disable capillarity.
 EFM_SIGMA_SCALE = parse(Float64, get(ENV, "EFM_SIGMA_SCALE", "1"))
 # EFM_ADAPTIVE=1 enables adaptive time stepping from the limiting Courant number.
@@ -197,9 +197,8 @@ initialise!(model.momentum.U, [0,0,0]);
 h_init = 0;#h_floor;
 initialise!(model.momentum.h, h_init)
 
-residuals = run!(model, config, inner_loops=2);
+residuals = run!(model, config, inner_loops=3);
 
 end;
 
-
-residuals = run!(model, config, inner_loops=2);
+residuals = run!(model, config, inner_loops=3);
