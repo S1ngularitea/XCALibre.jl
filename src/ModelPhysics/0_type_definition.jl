@@ -160,7 +160,10 @@ function Momentum{EFM}(;
     θm,
     gravity,
     capillary_dt=Inf,
-    wetting_mode="hard"
+    wetting_mode="hard",
+    inlet_corner_1=[0,0],
+    inlet_corner_2=[0,0],
+    inlet_flow_rate=0
 )
     coeffs = (
         σ=σ,
@@ -170,7 +173,10 @@ function Momentum{EFM}(;
         θm=θm,
         gravity=SVector{3}(gravity),
         capillary_dt=capillary_dt,
-        wetting_mode=_efm_wetting_mode(wetting_mode)
+        wetting_mode=_efm_wetting_mode(wetting_mode),
+        inlet_corner_1=inlet_corner_1,
+        inlet_corner_2=inlet_corner_2,
+        inlet_flow_rate=inlet_flow_rate,
     )
     ARG = typeof(coeffs)
     Momentum{EFM, ARG}(coeffs)
