@@ -720,13 +720,15 @@ Energy{FilmEnergy}(; Tref) = begin
     Energy{FilmEnergy, ARG}(coeffs)
 end
 
-function initialise(energy::Union{FilmEnergy}, model::Physics{Ti,F,S,M,Tu,E,D,BI}, phif, config) where{Ti,F,S,M<:EFM,Tu,E,D,BI}
+function initialise(energy::FilmEnergy, model::Physics{Ti,F,S,M,Tu,E,D,BI}, config) where{Ti,F,S,M<:EFM,Tu,E,D,BI}
 
     (; Te) = energy
     (; solvers, schemes, runtime, boundaries) = config
 
     mesh = model.domain
+    phif = FaceScalarField(mesh)
     rhs = ScalarField(mesh)
+    initialise!(rhs, -0e1)
     (; h) = model.momentum
 
     energy_eqn = (
@@ -758,12 +760,18 @@ function energy!(energy::FilmEnergyEquationModel, model::Physics{Ti,F,S,M,Tu,E,D
 
     hUf = get_flux(energy_eqn, 2)
 
+    T_prev = ScalarField(mesh)
+
     @. hUf.values = phif.values
+    copyto!(T_prev.values, Te.values)
 
     discretise!(energy_eqn, Te, config; time)
     apply_boundary_conditions!(energy_eqn, boundaries.T, nothing, time, config)
+    setReference!(energy_eqn, nothing, 1, config)
     update_preconditioner!(energy_eqn.preconditioner, mesh, config)
     T_res = solve_system!(energy_eqn, solvers.T, Te, nothing, config)
+
+    explicit_relaxation!(Te, T_prev.values, solvers.T.relax, config)
     #T_res = solve_equation!(energy_eqn, Te, boundaries.T, solvers.T, config)
     residuals = (:Te, T_res)
     converged = T_res <= solvers.T.convergence

@@ -92,7 +92,7 @@ function setup_FilmModel_Solver(solver_variant, model, config;
     if isnothing(model.energy)
         energyModel = nothing
     else
-        energyModel = initialise(model.energy, model, phif_U, config)
+        energyModel = initialise(model.energy, model, config)
     end
 
     @info "Initialising turbulence model"
@@ -249,12 +249,14 @@ function FilmModel(
     )
 
     @info "Starting EFM loops"
-    
+    divPhi = ScalarField(mesh)
+    div!(divPhi, phif_U, config)
+    #println(divPhi.values)
     bar = _progress_bar(iterations, progress)
             
     xdir, ydir, zdir = XDir(), YDir(), ZDir()
     #rh = 0
-    rx = ry = rz = zero(TF)
+    rx = ry = rz = rh = zero(TF)
     for iteration ∈ 1:iterations
         min_capillary_dt = update_capillary_dt!(
             config.runtime, capillaryDtFaces, mesh, hf, wf, rho.values[1], coeffs, config
@@ -267,7 +269,7 @@ function FilmModel(
         #@. model.energy.prevRhoK = rho.values*0.5*(U.x.values^2 + U.y.values^2)
         #@. model.energy.prevP = h.values;#P_hydr + P_surf
 
-        rx, ry, rz = solve_equation!(U_eqn, U, boundaries.U, solvers.U, xdir, ydir, zdir, config, time=time)
+        #=rx, ry, rz = solve_equation!(U_eqn, U, boundaries.U, solvers.U, xdir, ydir, zdir, config, time=time)
         project_vector_field_to_surface!(U, surfaceNormal, config)
         
         # ∇p term in energy!() isn't used so ∇w has been used to satisfy the function
@@ -277,7 +279,7 @@ function FilmModel(
         inverse_diagonal!(rD, U_eqn, config)
         interpolate!(rDf, rD, config)
         remove_film_pressure_source!(U_eqn, ∇P_hydr, ∇P_surf, P_hydrf, P_surff, rho.values[1], h, surfaceNormal, config)
-
+        
         H!(Hv, U, U_eqn, config)
         correct_film_velocity!(
             tempU, Hv, h, P_hydrf, P_surff, rD, rho.values[1],
@@ -348,7 +350,13 @@ function FilmModel(
             zero_film_correction_flux!(filmSurfaceFlux, boundaries.U, config)
             correct_film_flux2!(phif, filmSurfaceFlux, Df, h_eqn, hf, w, wf, boundaries.h, time, config)
         end
-
+        
+        update_film_fluxes!(
+            phif, filmVelocityFlux, mdotf, Uf, tempU, hf, w, wf,
+            boundaries.U, boundaries.h, time, config, phif_U, profile_factor
+        )=#
+        copyto!(prev, h.values)
+        rh = solve_film_h_equation!(h_eqn, h, h_old, boundaries.h, solvers.h, config, time=time)
         update_film_viscous_source!(nu_h, nu, h, coeffs.h_floor, config)
         update_liquid_pressure!(PLf, P_hydrf, P_surff, Pg, config)
 

@@ -148,7 +148,7 @@ solvers = (
         solver      = Bicgstab(), # Options: Cg(), Bicgstab(), Gmres()
         preconditioner = Jacobi(), # Options: NormDiagonal()
         convergence = 1e-11,
-        relax       = 1.0,
+        relax       = 0.9,
         rtol = 0.0,
         atol = 1e-8
     )

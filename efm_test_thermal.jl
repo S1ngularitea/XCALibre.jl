@@ -130,7 +130,7 @@ BCs = assign(
         ],
         T = [
             #FixedTemperature(:inlet, T=T_inlet, Enthalpy(cp=cp, Tref=T_ref)),
-            Dirichlet(:inlet, T_inlet),
+            Dirichlet(:inlet, T_inlet+00),
             Zerogradient(:outlet),
             Zerogradient(:inlet_sides),
             Zerogradient(:top_of_plate),
@@ -152,7 +152,8 @@ schemes = (
     ),
     T = Schemes(
         time=Euler,
-        divergence = Upwind
+        #divergence = Upwind
+        divergence=LUST
     )
 );
 
@@ -205,11 +206,24 @@ config = Configuration(
 
 GC.gc(true)
   
-initialise!(model.momentum.U, [0,0,0]);
+#=initialise!(model.momentum.U, [0,0,0]);
 h_init = h_floor;
 initialise!(model.momentum.h, h_init)
-initialise!(model.energy.Te, T_ref)
+for i ∈ 1:length(mesh_dev.cells)
+    if (abs(mesh_dev.cells[i].centre.y-(0.610/2))-(0.510/2))<0
+        model.momentum.U.x[i]=inlet_velocity[1] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+        model.momentum.U.y[i]=inlet_velocity[2] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+        model.momentum.h[i] = inlet_height
+    end
+end=#
+initialise!(model.energy.Te, T_ref+3)
+#for i ∈ 1:length(mesh_dev.cells)
+#    if (abs(mesh_dev.cells[i].centre.y-(0.610/2))-(0.510/2))<0
+#        model.energy.Te[i] = T_inlet * ((1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+#    end
+#end
 
 residuals = run!(model, config, inner_loops=2);
 
 end;
+
