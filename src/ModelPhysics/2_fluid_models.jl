@@ -5,6 +5,7 @@ export Phase, Fluid, Multiphase
 export AbstractModel, AbstractEosModel, AbstractViscosityModel
 export AbstractMultiphaseModel, VOF, Mixture
 export Incompressible, WeaklyCompressible, Compressible, SupersonicFlow
+export Film
 
 abstract type AbstractFluid end
 abstract type AbstractIncompressible <: AbstractFluid end
@@ -412,4 +413,29 @@ end
     nuf = nu
     rhof = FaceScalarField(mesh)
     SupersonicFlow(nu, rho, nuf, rhof, cp, gamma, Pr, R)
+end
+
+struct Film{T}
+    rho::T
+    nu::T
+    cp::T
+    k::T
+end
+Adapt.@adapt_structure Film
+
+Fluid{Film}(; rho=998.2, nu=1e-6, cp=4184.4, k=0.59803) = begin
+    coeffs = (rho=rho, nu=nu, cp=cp, k=k)
+    ARG = typeof(coeffs)
+    Fluid{Film, ARG}(coeffs)
+end
+
+(fluid::Fluid{Film, ARGS})(mesh) where ARGS=begin
+    coeffs = fluid.args
+    (; rho, nu, cp, k) = coeffs
+    rho = ConstantScalar(rho)
+    nu = ConstantScalar(nu)
+    cp = ConstantScalar(cp)
+    k = ConstantScalar(k)
+
+    Film(rho, nu, cp, k)
 end

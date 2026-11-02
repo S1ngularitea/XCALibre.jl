@@ -714,8 +714,8 @@ struct FilmEnergy{S, fS, C} <: AbstractEnergyModel
 end
 Adapt.@adapt_structure FilmEnergy
 
-Energy{FilmEnergy}(; Tref) = begin
-    coeffs= (Tref=Tref)
+Energy{FilmEnergy}(; T_wall=0, T_surf=0, T_ref=0) = begin
+    coeffs= (T_wall=T_wall, T_surf=T_surf, T_ref=T_ref)
     ARG = typeof(coeffs)
     Energy{FilmEnergy, ARG}(coeffs)
 end
@@ -728,7 +728,6 @@ function initialise(energy::FilmEnergy, model::Physics{Ti,F,S,M,Tu,E,D,BI}, conf
     mesh = model.domain
     phif = FaceScalarField(mesh)
     rhs = ScalarField(mesh)
-    initialise!(rhs, -0e1)
     (; h) = model.momentum
 
     energy_eqn = (
@@ -760,6 +759,10 @@ function energy!(energy::FilmEnergyEquationModel, model::Physics{Ti,F,S,M,Tu,E,D
 
     hUf = get_flux(energy_eqn, 2)
 
+    rhs = get_source(energy_eqn, 1)
+
+    calc_rhs!(rhs, Te, h, model.energy.coeffs, model.fluid, config)
+
     T_prev = ScalarField(mesh)
 
     @. hUf.values = phif.values
@@ -778,11 +781,35 @@ function energy!(energy::FilmEnergyEquationModel, model::Physics{Ti,F,S,M,Tu,E,D
     state.residuals = residuals
     state.converged = converged
 
-    T_ref=coeffs
+    (;T_ref)=coeffs
     adjust_for_film_wetting!(Te, w, T_ref, config)
 
     return nothing
 end
+
+function calc_rhs!(rhs, T, h, energy_coeffs, fluid_coeffs, config)
+    (; mesh) = T
+    (; hardware) = config
+    (; backend, workgroup) = hardware
+
+    nDrange = length(mesh.cells)
+    cell_kernel! = _sized(_calc_rhs!, backend, workgroup, nDrange)
+    cell_kernel!(rhs, T, h, energy_coeffs, fluid_coeffs)
+end
+
+@kernel function _calc_rhs!(rhs, T, h, energy_coeffs, fluid_coeffs)
+    cID = @index(Global)
+
+    @uniform begin
+        (; T_wall, T_surf) = energy_coeffs
+        (; cp, k) = fluid_coeffs 
+    end
+
+    @inbounds begin
+        rhs[cID] = 1/cp.values * (2*k.values/h[cID] * (T_surf + T_wall - 2*T[cID])) # using T[i] due to linear temperature assumption (should be changed for other profiles)
+    end
+end
+
 
 function adjust_for_film_wetting!(Te, w, T_ref, config)
     (; mesh) = Te
@@ -799,7 +826,7 @@ end
 
     @inbounds begin
         Te[cID] *= w[cID]
-        if Te[cID] == 0
+        if Te[cID] == 0#T_ref
             Te[cID] = T_ref
         end
     end

@@ -78,6 +78,7 @@ rho_l = 998.2; # Density of water @ 43°C kg/m3
 nu = mu/rho_l;
 
 cp = 4184.4 #https://www.engineeringtoolbox.com/specific-heat-capacity-water-d_660.html taken at 20c
+k = 0.59803 #https://www.engineeringtoolbox.com/water-liquid-gas-thermal-conductivity-temperature-pressure-d_2012.html#gsc.tab=0 taken at 20c
 T_inlet = 273+24
 T_ref = 288.15
 
@@ -103,9 +104,9 @@ model = Physics(
     momentum=Momentum{EFM}(;σ=σ, h_crit = h_crit, h_floor=h_floor, β=β, θm = θm,
         gravity=gravity_vector),
     time = Transient(),
-    fluid = Fluid{Incompressible}(; nu = nu, rho = rho_l),
+    fluid = Fluid{Film}(; rho=rho_l, nu=nu, cp=cp, k=k),
     turbulence = RANS{Laminar}(),
-    energy = Energy{FilmEnergy}(Tref=T_ref),
+    energy = Energy{FilmEnergy}(T_wall=T_ref, T_surf=T_ref, T_ref=T_ref),
     domain = mesh_dev
 );
 
@@ -130,7 +131,7 @@ BCs = assign(
         ],
         T = [
             #FixedTemperature(:inlet, T=T_inlet, Enthalpy(cp=cp, Tref=T_ref)),
-            Dirichlet(:inlet, T_inlet+00),
+            Dirichlet(:inlet, T_inlet),
             Zerogradient(:outlet),
             Zerogradient(:inlet_sides),
             Zerogradient(:top_of_plate),
@@ -178,7 +179,7 @@ solvers = (
         solver      = Bicgstab(),
         preconditioner = Jacobi(),
         convergence = 1e-11,
-        relax = 1.0,
+        relax = 0.5,
         rtol = 1e-4
     )
 );
@@ -211,12 +212,17 @@ h_init = h_floor;
 initialise!(model.momentum.h, h_init)
 for i ∈ 1:length(mesh_dev.cells)
     if (abs(mesh_dev.cells[i].centre.y-(0.610/2))-(0.510/2))<0
-        model.momentum.U.x[i]=inlet_velocity[1] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
-        model.momentum.U.y[i]=inlet_velocity[2] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+        #if (mesh_dev.cells[i].centre.y > 0.610/2)
+            model.momentum.U.x[i]=inlet_velocity[1] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+            model.momentum.U.y[i]=inlet_velocity[2] * (1+1-(1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
+        #=else
+            model.momentum.U.x[i]=inlet_velocity[1] * 2
+            model.momentum.U.y[i]=inlet_velocity[2] * 2
+        end=#
         model.momentum.h[i] = inlet_height
     end
 end=#
-initialise!(model.energy.Te, T_ref+3)
+initialise!(model.energy.Te, T_ref)
 #for i ∈ 1:length(mesh_dev.cells)
 #    if (abs(mesh_dev.cells[i].centre.y-(0.610/2))-(0.510/2))<0
 #        model.energy.Te[i] = T_inlet * ((1.15-mesh_dev.cells[i].centre.x)/1.15+0.15)
